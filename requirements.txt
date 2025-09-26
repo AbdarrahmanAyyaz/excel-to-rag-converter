@@ -1,0 +1,10 @@
+streamlit
+pandas
+openpyxl
+xlrd
+odfpy
+pdfplumber
+google-generative-ai
+orjson
+tqdm
+python-dotenv

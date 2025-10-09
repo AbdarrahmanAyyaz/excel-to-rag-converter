@@ -239,6 +239,45 @@ python -m streamlit run streamlit_app.py
 - **Process files in batches** rather than uploading everything at once
 - **Use JSONL format** for the most efficient output for large datasets
 
+## 🔧 Standalone CLI Tool
+
+For users who prefer a simple command-line tool without the web UI or AI features, a standalone Excel to JSON converter is available in `excel_to_json_converter.py`.
+
+### Features
+- Memory-efficient chunked processing (handles 4000+ rows)
+- Works with any Excel structure (auto-detects sheets & columns)
+- Comprehensive data cleaning (whitespace, dates, nulls, types)
+- No external API dependencies
+- Built-in progress bar
+
+### Usage
+
+**Command Line:**
+```bash
+# Basic conversion
+python excel_to_json_converter.py data.xlsx
+
+# With options
+python excel_to_json_converter.py data.xlsx -o output.json -c 1000 -s Sheet1
+```
+
+**Python API:**
+```python
+from excel_to_json_converter import excel_to_json
+
+# Simple
+result = excel_to_json('data.xlsx', 'output.json')
+
+# Advanced
+result = excel_to_json(
+    input_file='data.xlsx',
+    output_file='output.json',
+    chunk_size=1000,
+    sheets=['Sheet1', 'Sheet2'],
+    minified=True
+)
+```
+
 ## 📝 License
 
 This project is open source and available under the MIT License.

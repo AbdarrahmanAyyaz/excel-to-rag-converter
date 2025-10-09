@@ -96,7 +96,29 @@ def export_to_zip(file_results: List[FileResult], manifest: ConversionManifest,
 def _create_json_export(df: pd.DataFrame, sheet_result: SheetResult) -> Dict[str, Any]:
     """Create JSON export structure preserving original data."""
     # Convert DataFrame to records (list of dictionaries)
-    records = df.to_dict('records')
+    # Use orjson's default handler to convert non-serializable types
+    import numpy as np
+
+    def clean_value(val):
+        """Clean values for JSON serialization."""
+        if pd.isna(val):
+            return None
+        if isinstance(val, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+            return int(val)
+        if isinstance(val, (np.floating, np.float64, np.float32, np.float16)):
+            return float(val)
+        if isinstance(val, (np.bool_, bool)):
+            return bool(val)
+        if isinstance(val, (pd.Timestamp, pd.DatetimeTZDtype)):
+            return val.isoformat() if hasattr(val, 'isoformat') else str(val)
+        if isinstance(val, bytes):
+            return val.decode('utf-8', errors='ignore')
+        return val
+
+    records = []
+    for record in df.to_dict('records'):
+        clean_record = {k: clean_value(v) for k, v in record.items()}
+        records.append(clean_record)
 
     # Build the export structure
     export_data = {
@@ -130,6 +152,24 @@ def _create_json_export(df: pd.DataFrame, sheet_result: SheetResult) -> Dict[str
 
 def _create_jsonl_export(df: pd.DataFrame, sheet_result: SheetResult) -> str:
     """Create JSONL export (one JSON object per line)."""
+    import numpy as np
+
+    def clean_value(val):
+        """Clean values for JSON serialization."""
+        if pd.isna(val):
+            return None
+        if isinstance(val, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+            return int(val)
+        if isinstance(val, (np.floating, np.float64, np.float32, np.float16)):
+            return float(val)
+        if isinstance(val, (np.bool_, bool)):
+            return bool(val)
+        if isinstance(val, (pd.Timestamp, pd.DatetimeTZDtype)):
+            return val.isoformat() if hasattr(val, 'isoformat') else str(val)
+        if isinstance(val, bytes):
+            return val.decode('utf-8', errors='ignore')
+        return val
+
     lines = []
 
     # Add metadata as first line
@@ -139,7 +179,7 @@ def _create_jsonl_export(df: pd.DataFrame, sheet_result: SheetResult) -> str:
         "sheet_name": sheet_result.sheet_name,
         "row_count": sheet_result.row_count,
         "original_headers": sheet_result.original_headers,
-        "processing_time_seconds": sheet_result.processing_time_seconds
+        "processing_time_seconds": float(sheet_result.processing_time_seconds)
     }
 
     if sheet_result.suggested_headers:
@@ -150,9 +190,9 @@ def _create_jsonl_export(df: pd.DataFrame, sheet_result: SheetResult) -> str:
 
     lines.append(orjson.dumps(metadata).decode())
 
-    # Add each data row
+    # Add each data row with cleaned values
     for _, row in df.iterrows():
-        row_dict = row.to_dict()
+        row_dict = {k: clean_value(v) for k, v in row.to_dict().items()}
         row_dict["_type"] = "data"
         lines.append(orjson.dumps(row_dict).decode())
 

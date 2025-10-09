@@ -1,7 +1,7 @@
 """
 Excel-to-Everything Converter
 A Streamlit app for converting Excel and PDF files to JSON, JSONL, and Markdown
-with optional Gemini AI enhancements.
+with optional Gemini AI enhancements. Supports large files (4000+ rows).
 """
 
 import os

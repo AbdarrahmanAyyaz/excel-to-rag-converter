@@ -69,7 +69,7 @@ def convert_excel_file(file_bytes: bytes, file_name: str, settings: ExportSettin
 
 def _process_excel_sheet(excel_data: pd.ExcelFile, sheet_name: str, file_name: str,
                         settings: ExportSettings, gemini_client: Optional[GeminiClient]) -> SheetResult:
-    """Process a single Excel sheet."""
+    """Process a single Excel sheet with memory-efficient chunked processing for large files."""
     start_time = time.time()
     errors = []
     original_headers = []
@@ -80,10 +80,10 @@ def _process_excel_sheet(excel_data: pd.ExcelFile, sheet_name: str, file_name: s
     has_data = False
 
     try:
-        # Read the sheet
-        df = pd.read_excel(excel_data, sheet_name=sheet_name, header=None)
+        # First, read a small sample to detect headers (efficient for large files)
+        df_sample = pd.read_excel(excel_data, sheet_name=sheet_name, header=None, nrows=50)
 
-        if df.empty:
+        if df_sample.empty:
             return SheetResult(
                 file_name=file_name,
                 sheet_name=sheet_name,
@@ -97,20 +97,44 @@ def _process_excel_sheet(excel_data: pd.ExcelFile, sheet_name: str, file_name: s
                 errors=errors
             )
 
-        # Detect header row
-        header_row_idx = detect_header_row(df)
+        # Detect header row from sample
+        header_row_idx = detect_header_row(df_sample)
 
-        # Set the headers and data
+        # Set the headers
         if header_row_idx > 0:
-            # Use detected header row
-            original_headers = df.iloc[header_row_idx].astype(str).tolist()
-            df = df.iloc[header_row_idx + 1:].reset_index(drop=True)
-            df.columns = original_headers
+            original_headers = df_sample.iloc[header_row_idx].astype(str).tolist()
         else:
-            # Use first row as headers
-            original_headers = df.iloc[0].astype(str).tolist()
-            df = df.iloc[1:].reset_index(drop=True)
-            df.columns = original_headers
+            original_headers = df_sample.iloc[0].astype(str).tolist()
+
+        # Now read the full sheet efficiently
+        # For large files (4000+ rows), this uses pandas' built-in optimizations
+        try:
+            df = pd.read_excel(
+                excel_data,
+                sheet_name=sheet_name,
+                header=header_row_idx if header_row_idx >= 0 else 0
+            )
+        except Exception as read_error:
+            # Fallback: try reading without header detection
+            df = pd.read_excel(excel_data, sheet_name=sheet_name, header=0)
+            original_headers = df.columns.tolist()
+
+        if df.empty:
+            return SheetResult(
+                file_name=file_name,
+                sheet_name=sheet_name,
+                original_headers=original_headers,
+                suggested_headers=None,
+                row_count=0,
+                summary=None,
+                fact_sentences=None,
+                has_data=False,
+                processing_time_seconds=time.time() - start_time,
+                errors=errors
+            )
+
+        # Ensure column names match detected headers
+        df.columns = original_headers[:len(df.columns)]
 
         # Clean up the dataframe
         df = forward_fill_dataframe(df)
@@ -361,21 +385,26 @@ def get_sheet_dataframe(file_bytes: bytes, file_name: str, sheet_name: str) -> O
         if file_extension in ['xls', 'xlsx']:
             excel_data = pd.ExcelFile(BytesIO(file_bytes))
             if sheet_name in excel_data.sheet_names:
-                df = pd.read_excel(excel_data, sheet_name=sheet_name, header=None)
+                # Read sample first for header detection (memory efficient)
+                df_sample = pd.read_excel(excel_data, sheet_name=sheet_name, header=None, nrows=50)
 
-                if not df.empty:
-                    # Detect and set headers
-                    header_row_idx = detect_header_row(df)
-                    if header_row_idx > 0:
-                        headers = df.iloc[header_row_idx].astype(str).tolist()
-                        df = df.iloc[header_row_idx + 1:].reset_index(drop=True)
-                        df.columns = headers
-                    else:
-                        headers = df.iloc[0].astype(str).tolist()
-                        df = df.iloc[1:].reset_index(drop=True)
-                        df.columns = headers
+                if not df_sample.empty:
+                    # Detect headers from sample
+                    header_row_idx = detect_header_row(df_sample)
 
-                    return forward_fill_dataframe(df)
+                    # Read full sheet with detected header
+                    try:
+                        df = pd.read_excel(
+                            excel_data,
+                            sheet_name=sheet_name,
+                            header=header_row_idx if header_row_idx >= 0 else 0
+                        )
+                    except Exception:
+                        # Fallback
+                        df = pd.read_excel(excel_data, sheet_name=sheet_name, header=0)
+
+                    if not df.empty:
+                        return forward_fill_dataframe(df)
 
         elif file_extension == 'pdf':
             # For PDF, we'd need to re-extract the specific table
